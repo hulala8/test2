@@ -2,10 +2,11 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>销售数据交互看板</title>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body { font-family: 'Microsoft YaHei', sans-serif; margin: 0; padding: 20px; background-color: #f4f4f4; }
@@ -82,8 +83,7 @@
         /* 主内容区 */
         .main-content { display: block; margin-bottom: 20px; }
         .table-container { width: 100%; border: 1px solid #ddd; overflow-y: auto; height: 470px; }
-        .chart-section { margin-top: 20px; margin-bottom: 20px; }
-        .chart-container { width: 100%; height: 450px; border: 1px solid #ddd; padding: 10px; }
+
 
         /* 表格基础样式 */
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -255,6 +255,110 @@
         .hospital-row { background-color: #ffffff; }
         .hidden { display: none; }
 
+        /* 移动端适配样式 */
+        .mobile-filter-toggle {
+            display: none;
+            width: 100%;
+            padding: 10px;
+            background-color: #fce4d6;
+            color: #ed7d31;
+            border: 1px solid #ed7d31;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            cursor: pointer;
+            margin-bottom: 10px;
+        }
+
+        .filter-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 99;
+        }
+
+        @media screen and (max-width: 768px) {
+            body { padding: 8px; font-size: 12px; }
+            .dashboard { padding: 10px; padding-top: 0; }
+            .header-bar { flex-direction: column; align-items: flex-start; gap: 10px; }
+            .header-bar h2 { font-size: 18px; }
+            .upload-btn { width: 100%; text-align: center; }
+
+            /* 可折叠筛选器面板 */
+            .mobile-filter-toggle { display: block; }
+            .filters {
+                display: none; /* 默认隐藏 */
+                flex-direction: column;
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 90%;
+                max-height: 80vh;
+                background: white;
+                padding: 15px;
+                border-radius: 8px;
+                z-index: 100;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+                overflow-y: auto;
+            }
+            .filters.show { display: flex; }
+            .filter-group { min-width: 100%; }
+
+            /* 数据截止日期 */
+            .data-date-banner { font-size: 12px; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+            .data-date-banner .date-value { font-size: 14px; }
+            .data-date-banner .progress-value { font-size: 14px; }
+            .data-date-banner .progress-divider { display: none; }
+            
+            /* KPI卡片两列/三列排布 */
+            .kpi-container { flex-wrap: wrap; gap: 10px; padding: 10px; background-color: transparent; }
+            .kpi-box { 
+                flex: 1 1 45%; 
+                background-color: #203764; 
+                border-radius: 5px; 
+                padding: 10px; 
+                border-right: none;
+                margin-bottom: 5px;
+            }
+            .kpi-title { font-size: 12px; }
+            .kpi-value { font-size: 18px; }
+
+            /* 表格冻结第一列 & 横向滚动 */
+            .table-container { 
+                height: 500px;
+                overflow-x: auto; 
+                -webkit-overflow-scrolling: touch; 
+            }
+            table { min-width: 800px; /* 强制表格宽度 */ }
+            th, td { font-size: 12px; padding: 6px; }
+            
+            /* 冻结三个表格的第一列 */
+            #data-table th:first-child, #data-table td:first-child,
+            #product-table th:first-child, #product-table td:first-child,
+            #sales-table th:first-child, #sales-table td:first-child {
+                position: sticky;
+                left: 0;
+                z-index: 5;
+            }
+            /* 第一列背景色，防止透明背景字体重叠 */
+            #data-table th:first-child, #product-table th:first-child, #sales-table th:first-child {
+                background-color: #203764;
+                z-index: 15; /* 表头交叉处层级更高 */
+            }
+            #data-table .prov-row td:first-child, #product-table .cat-row td:first-child, #sales-table .prov-row td:first-child { background-color: #e2efda; }
+            #data-table .office-row td:first-child, #product-table .name-row td:first-child, #sales-table .office-row td:first-child { background-color: #fce4d6; }
+            #data-table .hospital-row td:first-child, #product-table .prov-row td:first-child, #sales-table .hospital-row td:first-child { background-color: #fff; }
+            #product-table .office-row td:first-child { background-color: #ddebf7; }
+            #product-table .hospital-row td:first-child { background-color: #ffffff; }
+
+            /* 按钮和切换器 */
+            .mom-toggle-container { flex-wrap: wrap; justify-content: center; }
+            .sales-toggle-container { flex-wrap: wrap; justify-content: flex-start; }
+            .sales-kpi-container { flex-direction: column; }
+        }
         /* 登录页面样式 */
         #login-overlay {
             position: fixed;
@@ -345,6 +449,12 @@
         </div>
 
         <div id="message-area"></div>
+
+        <!-- 移动端筛选器切换按钮 -->
+        <button id="mobile-filter-toggle" class="mobile-filter-toggle" style="display: none;" onclick="toggleMobileFilters()">
+            🔍 筛选条件 (已选 <span id="filter-badge">全局</span>) ▼
+        </button>
+        <div id="filter-overlay" class="filter-overlay" onclick="toggleMobileFilters()"></div>
 
         <!-- 多选筛选器 -->
         <div class="filters" id="filters-container" style="display: none;">
@@ -581,10 +691,7 @@
             </div>
         </div>
 
-        <!-- 图表区域 - 移到页面最下方 -->
-        <div class="chart-section">
-            <div id="chart" class="chart-container"></div>
-        </div>
+
     </div>
 
     <div id="empty-state" class="empty-state">
@@ -597,7 +704,7 @@
     // 全局数据存储
     let rawData = [];
     let filteredData = [];
-    let myChart = null;
+
 
     // 产品单价配置（元/最小包装）
     const productPrices = {
@@ -661,8 +768,8 @@
     // 数据截止日期（从文件名提取）
     let dataCutoffDate = '';
 
-    // 默认数据文件名
-    const DEFAULT_DATA_FILE = '2026西北大区数据-全-3月23日.xlsx';
+    // 默认加密后的数据文件名
+    const DEFAULT_DATA_FILE = 'data.bin';
     // 设定的固定密码
     const ACCESS_PASSWORD = 'hr@1234';
 
@@ -694,23 +801,34 @@
         }
     }
 
-    // 自动加载预置数据
+    // 自动加载预置加密数据
     function autoLoadData() {
-        showLoading('正在自动加载系统数据，请稍候...');
+        showLoading('正在安全解密并解析数据，请稍候...');
         
         const xhr = new XMLHttpRequest();
         xhr.open('GET', DEFAULT_DATA_FILE, true);
-        xhr.responseType = 'arraybuffer';
+        xhr.responseType = 'text'; // 加密后的文件是字符串格式
         
         xhr.onload = function(e) {
             if (xhr.status === 200) {
-                const data = new Uint8Array(xhr.response);
+                const encryptedData = xhr.responseText;
+                const password = ACCESS_PASSWORD; // 使用登录密码解密
+                
                 try {
-                    console.log('自动加载文件成功:' + DEFAULT_DATA_FILE);
-                    const workbook = XLSX.read(data, { type: 'array' });
+                    console.log('自动获取加密文件成功:' + DEFAULT_DATA_FILE);
                     
-                    // 从默认文件名中提取日期
-                    dataCutoffDate = extractDateFromFilename(DEFAULT_DATA_FILE);
+                    // 1. 使用 CryptoJS 解密
+                    const decrypted = CryptoJS.AES.decrypt(encryptedData, password);
+                    
+                    // 2. 将 WordArray 转换为 ArrayBuffer (Uint8Array)
+                    const uint8Array = new Uint8Array(decrypted.sigBytes);
+                    const words = decrypted.words;
+                    for (let i = 0; i < decrypted.sigBytes; i++) {
+                        uint8Array[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
+                    }
+                    
+                    // 3. 使用 XLSX 读取解密后的二进制流
+                    const workbook = XLSX.read(uint8Array, { type: 'array' });
                     
                     const firstSheetName = workbook.SheetNames[0];
                     const worksheet = workbook.Sheets[firstSheetName];
@@ -720,6 +838,9 @@
                         defval: ''
                     });
                     
+                    // 特别处理：从第一行数据提取日期（如果文件名无法提取）
+                    dataCutoffDate = '加密模式'; 
+
                     const headers = jsonData[0].map(h => String(h).trim());
                     const rows = [];
                     for (let i = 1; i < jsonData.length; i++) {
@@ -733,20 +854,14 @@
                     
                     validateAndProcess(rows, headers);
                 } catch (err) {
-                    console.error('自动加载数据解析失败:', err);
+                    console.error('自动解密或解析数据失败:', err);
                     resetEmptyState();
-                    showMessage('自动加载数据失败，请手动上传', 'error');
+                    showMessage('自动解密失败，请务必保证密码正确', 'error');
                 }
             } else {
-                console.warn('默认数据文件未找到或加载失败:', xhr.status);
+                console.warn('加密数据文件未找到或加载失败:', xhr.status);
                 resetEmptyState();
-                // 如果找不到自动加载的文件，显示普通空状态，不提示报错，因为用户可能还没上传
             }
-        };
-        
-        xhr.onerror = function() {
-            console.error('网络请求错误，无法加载默认数据');
-            resetEmptyState();
         };
         
         xhr.send();
@@ -754,7 +869,6 @@
 
     // 页面加载后的操作
     window.onload = function() {
-        // 检查之前是否已经登录过
         if (sessionStorage.getItem('isLoggedIn') === 'true') {
             showMainDashboard();
         }
@@ -1211,15 +1325,21 @@
 
             // 显示看板
             document.getElementById('empty-state').style.display = 'none';
-            document.getElementById('filters-container').style.display = 'flex';
+            // 桌面端显示flex，移动端交给媒体查询和js控制
+            const filtersContainer = document.getElementById('filters-container');
+            if (window.innerWidth > 768) {
+                filtersContainer.style.display = 'flex';
+            }
+            
+            // 显示移动端切换按钮
+            document.getElementById('mobile-filter-toggle').style.display = window.innerWidth <= 768 ? 'block' : 'none';
+
             document.getElementById('dashboard-content').style.display = 'block';
 
             // 显示数据截止日期
             showDataDate(dataCutoffDate);
 
-            if (!myChart) {
-                myChart = echarts.init(document.getElementById('chart'));
-            }
+
 
             initFilters();
             applyFilters();
@@ -1306,7 +1426,7 @@
     }
 
     // 切换筛选
-    function toggleFilter(key, value, checkbox) {
+    window.toggleFilter = function(key, value, checkbox) {
         const label = checkbox.closest('.filter-option');
         if (checkbox.checked) {
             filterState[key].add(value);
@@ -1330,7 +1450,7 @@
     }
 
     // 全选/取消全选
-    function toggleSelectAll(key) {
+    window.toggleSelectAll = function(key) {
         const container = document.getElementById('f-' + key);
         const checkboxes = container.querySelectorAll('input[type="checkbox"]');
         const allChecked = Array.from(checkboxes).every(cb => cb.checked);
@@ -1358,6 +1478,36 @@
         }
         
         applyFilters();
+    }
+
+    // 移动端筛选器折叠切换
+    window.toggleMobileFilters = function() {
+        const filters = document.getElementById('filters-container');
+        const overlay = document.getElementById('filter-overlay');
+        const isShowing = filters.classList.contains('show');
+        
+        if (isShowing) {
+            filters.classList.remove('show');
+            overlay.style.display = 'none';
+            if (window.innerWidth <= 768) {
+                filters.style.display = 'none';
+            }
+        } else {
+            filters.classList.add('show');
+            overlay.style.display = 'block';
+            if (window.innerWidth <= 768) {
+                filters.style.display = 'flex';
+            }
+        }
+    }
+
+    // 更新移动端筛选器按钮上的徽章文字
+    function updateFilterBadge() {
+        const badge = document.getElementById('filter-badge');
+        if (!badge) return;
+        
+        let totalSelected = filterState.month.size + filterState.prov.size + filterState.office.size + filterState.cat.size + filterState.name.size;
+        badge.textContent = totalSelected + '项';
     }
 
     // 更新产品名称筛选器（根据选中的产品大类）
@@ -1470,8 +1620,8 @@
         });
 
         updateKPIs();
-        updateChart();
         updateTable();
+        updateFilterBadge(); // 更新移动端徽章
     }
 
     // 更新KPI
@@ -1519,184 +1669,7 @@
         momEl.style.color = mom >= 0 ? '#70ad47' : '#ed7d31';
     }
 
-    // 更新图表
-    function updateChart() {
-        const monthGroups = {};
-        const monthGroups2025 = {}; // 2025年同期数据
-        
-        filteredData.forEach(row => {
-            const m = row['月份'];
-            if (!m) return;
-            if (!monthGroups[m]) monthGroups[m] = { target: 0, actual: 0 };
-            monthGroups[m].target += row.target || 0;
-            monthGroups[m].actual += row.actual || 0;
-        });
-        
-        // 计算2025年同期数据（用于同比增长率）
-        rawData.forEach(row => {
-            const m = row['月份'];
-            if (!m) return;
-            // 只计算当前筛选条件下的数据
-            if (filterState.prov.size > 0 && !filterState.prov.has(row['所在省区'])) return;
-            if (filterState.office.size > 0 && !filterState.office.has(row['所在办事处'])) return;
-            if (filterState.cat.size > 0 && !filterState.cat.has(row['产品大类'])) return;
-            if (filterState.name.size > 0 && !filterState.name.has(row['产品名称'])) return;
-            
-            if (!monthGroups2025[m]) monthGroups2025[m] = { actual: 0 };
-            monthGroups2025[m].actual += row.actual2025 || 0;
-        });
 
-        const months = Object.keys(monthGroups).sort((a, b) => parseInt(a) - parseInt(b));
-        const targetData = months.map(m => (monthGroups[m].target || 0).toFixed(1));
-        const actualData = months.map(m => (monthGroups[m].actual || 0).toFixed(1));
-        const rateData = months.map(m => {
-            const t = monthGroups[m].target, a = monthGroups[m].actual;
-            return t ? ((a / t) * 100).toFixed(1) : 0;
-        });
-        
-        // 计算同比增长率数据
-        const yoyData = months.map(m => {
-            const actual2026 = monthGroups[m].actual || 0;
-            const actual2025 = monthGroups2025[m]?.actual || 0;
-            return actual2025 > 0 ? (((actual2026 - actual2025) / actual2025) * 100).toFixed(1) : 0;
-        });
-
-        myChart.setOption({
-            tooltip: { 
-                trigger: 'axis', 
-                axisPointer: { type: 'cross' },
-                backgroundColor: 'rgba(255,255,255,0.95)',
-                borderColor: '#ccc',
-                borderWidth: 1,
-                textStyle: { color: '#333' },
-                extraCssText: 'box-shadow: 0 4px 12px rgba(0,0,0,0.15);',
-                formatter: function(params) {
-                    let result = '<div style="font-weight:bold;margin-bottom:5px;">' + params[0].axisValue + '</div>';
-                    params.forEach(function(item) {
-                        let value = item.value;
-                        // 为达成率和同比增长率添加 % 符号
-                        if (item.seriesName === '进货达成率' || item.seriesName === '同比增长率') {
-                            value = value + '%';
-                        }
-                        result += '<div style="display:flex;align-items:center;margin:3px 0;">';
-                        result += '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + item.color + ';margin-right:8px;"></span>';
-                        result += '<span style="flex:1;">' + item.seriesName + '</span>';
-                        result += '<span style="font-weight:bold;margin-left:15px;">' + value + '</span>';
-                        result += '</div>';
-                    });
-                    return result;
-                }
-            },
-            legend: { 
-                data: ['指标 (万)', '进货 (万)', '进货达成率', '同比增长率'],
-                top: 10,
-                textStyle: { fontSize: 12 }
-            },
-            grid: { 
-                left: '3%', 
-                right: '4%', 
-                bottom: '3%', 
-                top: 60,
-                containLabel: true,
-                backgroundColor: 'rgba(240,240,240,0.3)'
-            },
-            xAxis: [{ 
-                type: 'category', 
-                data: months,
-                axisLine: { lineStyle: { color: '#999' } },
-                axisTick: { show: false },
-                splitLine: { show: false }
-            }],
-            yAxis: [
-                { 
-                    type: 'value', 
-                    name: '金额 (万)',
-                    nameTextStyle: { color: '#666' },
-                    axisLine: { show: false },
-                    axisTick: { show: false },
-                    splitLine: { lineStyle: { color: '#eee', type: 'dashed' } }
-                },
-                { 
-                    type: 'value', 
-                    name: '比率 %', 
-                    nameTextStyle: { color: '#666' },
-                    axisLabel: { formatter: '{value}%' },
-                    axisLine: { show: false },
-                    axisTick: { show: false },
-                    splitLine: { show: false }
-                }
-            ],
-            series: [
-                { 
-                    name: '指标 (万)', 
-                    type: 'bar', 
-                    itemStyle: { 
-                        color: '#4472c4',
-                        shadowColor: 'rgba(68,114,196,0.3)',
-                        shadowBlur: 8,
-                        shadowOffsetY: 3
-                    }, 
-                    data: targetData 
-                },
-                { 
-                    name: '进货 (万)', 
-                    type: 'bar', 
-                    itemStyle: { 
-                        color: '#ed7d31',
-                        shadowColor: 'rgba(237,125,49,0.3)',
-                        shadowBlur: 8,
-                        shadowOffsetY: 3
-                    }, 
-                    data: actualData 
-                },
-                { 
-                    name: '进货达成率', 
-                    type: 'line', 
-                    yAxisIndex: 1, 
-                    smooth: true,
-                    symbol: 'circle',
-                    symbolSize: 8,
-                    lineStyle: { 
-                        color: '#70ad47', 
-                        width: 3,
-                        shadowColor: 'rgba(112,173,71,0.3)',
-                        shadowBlur: 8,
-                        shadowOffsetY: 3
-                    },
-                    itemStyle: { 
-                        color: '#70ad47',
-                        borderWidth: 2,
-                        borderColor: '#fff'
-                    },
-                    label: { show: true, formatter: '{c}%', color: '#70ad47', fontWeight: 'bold' }, 
-                    data: rateData 
-                },
-                { 
-                    name: '同比增长率', 
-                    type: 'line', 
-                    yAxisIndex: 1, 
-                    smooth: true,
-                    symbol: 'diamond',
-                    symbolSize: 8,
-                    lineStyle: { 
-                        color: '#5b9bd5', 
-                        width: 3,
-                        type: 'dashed',
-                        shadowColor: 'rgba(91,155,213,0.3)',
-                        shadowBlur: 8,
-                        shadowOffsetY: 3
-                    },
-                    itemStyle: { 
-                        color: '#5b9bd5',
-                        borderWidth: 2,
-                        borderColor: '#fff'
-                    },
-                    label: { show: true, formatter: '{c}%', color: '#5b9bd5', fontWeight: 'bold' }, 
-                    data: yoyData 
-                }
-            ]
-        }, true);
-    }
 
     // 更新表格 - 三级展开结构（支持三级独立排序）
     function updateTable() {

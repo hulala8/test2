@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据加密转换工具</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #4472c4;
+            --secondary-color: #203764;
+            --background-color: #f4f7f9;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, 'Microsoft YaHei';
+            background-color: var(--background-color);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            background-color: #fff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+        }
+        h1 { color: var(--secondary-color); margin-bottom: 30px; }
+        .description { font-size: 14px; color: #666; margin-bottom: 30px; line-height: 1.6; }
+        .input-group { margin-bottom: 20px; text-align: left; }
+        label { display: block; font-size: 14px; font-weight: bold; margin-bottom: 8px; color: var(--secondary-color); }
+        input[type="file"], input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        .btn {
+            display: inline-block;
+            width: 100%;
+            padding: 15px;
+            background-color: var(--primary-color);
+            color: #fff;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin-top: 10px;
+        }
+        .btn:hover { background-color: var(--secondary-color); }
+        .result-box {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #f0f9ff;
+            border: 1px dashed var(--primary-color);
+            border-radius: 8px;
+            display: none;
+        }
+        .error { color: #d93025; font-size: 14px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🔒 数据加密转换工具</h1>
+    <p class="description">
+        本工具将您的 Excel 原始数据加密。加密后的文件（.bin）可以放心地上传到 GitHub 仓库，
+        只有在看板输入了正确的解密密码后，才能还原数据并显示看版。
+    </p>
+
+    <div class="input-group">
+        <label for="file-input">1. 选择原始 Excel 文件 (.xlsx)</label>
+        <input type="file" id="file-input" accept=".xlsx,.xls">
+    </div>
+
+    <div class="input-group">
+        <label for="password-input">2. 设置加密密码（务必与看板登录密码一致）</label>
+        <input type="password" id="password-input" placeholder="输入加密密码..." value="hr@1234">
+    </div>
+
+    <button class="btn" onclick="encryptFile()">加密并下载加密文件</button>
+
+    <div id="result" class="result-box">
+        <p style="color: #2e7d32; font-weight: bold; margin-bottom: 10px;">✅ 加密完成！</p>
+        <p style="font-size: 13px; color: #444;">
+            请将下载的 <b>data.bin</b> 文件上传到您的 GitHub 仓库目录下，代替原来的 Excel 文件。
+        </p>
+    </div>
+
+    <div id="error-msg" class="error"></div>
+</div>
+
+<script>
+    async function encryptFile() {
+        const fileInput = document.getElementById('file-input');
+        const passwordInput = document.getElementById('password-input');
+        const errorMsg = document.getElementById('error-msg');
+        const resultBox = document.getElementById('result');
+
+        errorMsg.textContent = '';
+        resultBox.style.display = 'none';
+
+        if (!fileInput.files || fileInput.files.length === 0) {
+            errorMsg.textContent = '请先选择文件！';
+            return;
+        }
+
+        const password = passwordInput.value;
+        if (!password) {
+            errorMsg.textContent = '请输入加密密码！';
+            return;
+        }
+
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+
+        reader.onload = function(e) {
+            try {
+                // 1. 获取文件的 ArrayBuffer 并转换为 WordArray (CryptoJS 支持的格式)
+                const arrayBuffer = e.target.result;
+                const wordArray = CryptoJS.lib.WordArray.create(arrayBuffer);
+
+                // 2. 加密成字符串 (使用 AES 对称加密)
+                const encrypted = CryptoJS.AES.encrypt(wordArray, password).toString();
+
+                // 3. 将加密后的字符串作为数据下载
+                const blob = new Blob([encrypted], { type: 'application/octet-stream' });
+                const downloadUrl = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = 'data.bin'; // 导出为统一命名的 data.bin
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+
+                resultBox.style.display = 'block';
+            } catch (err) {
+                console.error(err);
+                errorMsg.textContent = '加密过程中出现错误。';
+            }
+        };
+
+        reader.readAsArrayBuffer(file);
+    }
+</script>
+
+</body>
+</html>

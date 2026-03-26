@@ -6,6 +6,7 @@
     <title>销售数据交互看板</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body { font-family: 'Microsoft YaHei', sans-serif; margin: 0; padding: 20px; background-color: #f4f4f4; }
@@ -767,8 +768,8 @@
     // 数据截止日期（从文件名提取）
     let dataCutoffDate = '';
 
-    // 默认数据文件名
-    const DEFAULT_DATA_FILE = '2026西北大区数据-全-3月23日.xlsx';
+    // 默认加密后的数据文件名
+    const DEFAULT_DATA_FILE = 'data.bin';
     // 设定的固定密码
     const ACCESS_PASSWORD = 'hr@1234';
 
@@ -800,23 +801,34 @@
         }
     }
 
-    // 自动加载预置数据
+    // 自动加载预置加密数据
     function autoLoadData() {
-        showLoading('正在自动加载系统数据，请稍候...');
+        showLoading('正在安全解密并解析数据，请稍候...');
         
         const xhr = new XMLHttpRequest();
         xhr.open('GET', DEFAULT_DATA_FILE, true);
-        xhr.responseType = 'arraybuffer';
+        xhr.responseType = 'text'; // 加密后的文件是字符串格式
         
         xhr.onload = function(e) {
             if (xhr.status === 200) {
-                const data = new Uint8Array(xhr.response);
+                const encryptedData = xhr.responseText;
+                const password = ACCESS_PASSWORD; // 使用登录密码解密
+                
                 try {
-                    console.log('自动加载文件成功:' + DEFAULT_DATA_FILE);
-                    const workbook = XLSX.read(data, { type: 'array' });
+                    console.log('自动获取加密文件成功:' + DEFAULT_DATA_FILE);
                     
-                    // 从默认文件名中提取日期
-                    dataCutoffDate = extractDateFromFilename(DEFAULT_DATA_FILE);
+                    // 1. 使用 CryptoJS 解密
+                    const decrypted = CryptoJS.AES.decrypt(encryptedData, password);
+                    
+                    // 2. 将 WordArray 转换为 ArrayBuffer (Uint8Array)
+                    const uint8Array = new Uint8Array(decrypted.sigBytes);
+                    const words = decrypted.words;
+                    for (let i = 0; i < decrypted.sigBytes; i++) {
+                        uint8Array[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
+                    }
+                    
+                    // 3. 使用 XLSX 读取解密后的二进制流
+                    const workbook = XLSX.read(uint8Array, { type: 'array' });
                     
                     const firstSheetName = workbook.SheetNames[0];
                     const worksheet = workbook.Sheets[firstSheetName];
@@ -826,6 +838,9 @@
                         defval: ''
                     });
                     
+                    // 特别处理：从第一行数据提取日期（如果文件名无法提取）
+                    dataCutoffDate = '加密模式'; 
+
                     const headers = jsonData[0].map(h => String(h).trim());
                     const rows = [];
                     for (let i = 1; i < jsonData.length; i++) {
@@ -839,12 +854,12 @@
                     
                     validateAndProcess(rows, headers);
                 } catch (err) {
-                    console.error('自动加载数据解析失败:', err);
+                    console.error('自动解密或解析数据失败:', err);
                     resetEmptyState();
-                    showMessage('自动加载数据失败，请手动上传', 'error');
+                    showMessage('自动解密失败，请务必保证密码正确', 'error');
                 }
             } else {
-                console.warn('默认数据文件未找到或加载失败:', xhr.status);
+                console.warn('加密数据文件未找到或加载失败:', xhr.status);
                 resetEmptyState();
             }
         };
