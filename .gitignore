@@ -1,0 +1,4 @@
+.DS_Store
+*.tmp
+# 忽略备份和复制文件
+*copy.html
