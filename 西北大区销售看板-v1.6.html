@@ -291,6 +291,7 @@
             .filters {
                 display: none; /* 默认隐藏 */
                 flex-direction: column;
+                flex-wrap: nowrap; /* 强制不换行，解决产品名称被挤到右侧的问题 */
                 position: fixed;
                 top: 50%;
                 left: 50%;
@@ -305,7 +306,8 @@
                 overflow-y: auto;
             }
             .filters.show { display: flex; }
-            .filter-group { min-width: 100%; }
+            .filter-group { min-width: 100%; border-bottom: 1px dotted #ccc; padding-bottom: 15px; margin-bottom: 10px; }
+            .filter-options { max-height: 150px; /* 让手机端看到更多的筛选项，不再局限于72px */ }
 
             /* 数据截止日期 */
             .data-date-banner { font-size: 12px; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
@@ -326,9 +328,10 @@
             .kpi-title { font-size: 12px; }
             .kpi-value { font-size: 18px; }
 
-            /* 表格冻结第一列 & 横向滚动 */
+            /* 表格高度自适应，横向滚动 */
             .table-container { 
-                height: 500px;
+                height: auto !important; 
+                max-height: 65vh !important; /* 随内容撑开，不固定500px */
                 overflow-x: auto; 
                 -webkit-overflow-scrolling: touch; 
             }
@@ -357,7 +360,13 @@
             /* 按钮和切换器 */
             .mom-toggle-container { flex-wrap: wrap; justify-content: center; }
             .sales-toggle-container { flex-wrap: wrap; justify-content: flex-start; }
-            .sales-kpi-container { flex-direction: column; }
+            
+            /* 纯销卡片两列 */
+            .sales-kpi-container { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .sales-kpi-card { min-width: 0; padding: 10px; }
+            .sales-kpi-card h4 { font-size: 14px; }
+            .sales-kpi-value { font-size: 18px; }
+            .sales-kpi-rate { font-size: 16px; }
         }
         /* 登录页面样式 */
         #login-overlay {
