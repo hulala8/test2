@@ -825,8 +825,8 @@
         try {
             // 使用传统 XHR 以便获取进度 & 更好的旧设备兼容
             const xhr = new XMLHttpRequest();
-            const cacheBust = '?v=' + new Date().getTime();
-            xhr.open('GET', DEFAULT_DATA_FILE + cacheBust, true);
+            // 移除缓存破坏后缀以使用CDN节点加速
+            xhr.open('GET', DEFAULT_DATA_FILE, true);
             xhr.responseType = 'text';
 
             // 监听下载进度
@@ -835,7 +835,8 @@
                     const percent = Math.round((e.loaded / e.total) * 100);
                     showLoading(`正在获取安全通道数据... ${percent}%`);
                 } else {
-                    showLoading('正在持续获取安全通道数据 (5MB+)...');
+                    const mb = (e.loaded / 1024 / 1024).toFixed(2);
+                    showLoading(`正在获取安全通道数据: 已下载 ${mb} MB... (请耐心等待)`);
                 }
             };
 
@@ -844,9 +845,8 @@
                     if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
                     else reject(new Error('网络请求失败, 状态:' + xhr.status));
                 };
-                xhr.onerror = () => reject(new Error('网络连接中断, 请检查手机信号'));
-                xhr.ontimeout = () => reject(new Error('服务器响应超时, 请稍后重试'));
-                xhr.timeout = 60000; // 60s timeout
+                xhr.onerror = () => reject(new Error('网络连接异常中断，请检查手机信号或切换 WiFi 再试'));
+                // 彻底取消系统级超时限制，完全交给浏览器底层控制，适应慢网速
                 xhr.send();
             });
 
