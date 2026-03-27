@@ -308,27 +308,57 @@
             }
             .filters.show { display: flex; }
             .filter-group { min-width: 100%; border-bottom: 1px dotted #ccc; padding-bottom: 15px; margin-bottom: 10px; }
-            .filter-options { max-height: 150px; }
+            .filter-options { max-height: 150px; /* 让手机端看到更多的筛选项，不再局限于72px */ }
 
-            /* 彻底恢复最原始的 KPI 与 横幅样式 */
-            .data-date-banner {
-                padding: 15px; font-size: 18px; line-height: 1.6;
-                flex-direction: column; text-align: center;
-                border-radius: 8px; font-weight: bold;
-            }
-            .data-date-banner .date-label, .data-date-banner .progress-label { display: inline; }
-            .data-date-banner .progress-divider { display: block; margin: 10px 0; opacity: 0.5; }
-
-            .kpi-container { display: flex; flex-direction: column; gap: 15px; }
-            .kpi-box { padding: 25px 20px; border-radius: 12px; margin-bottom: 5px; }
-            .kpi-value { font-size: 28px; font-weight: bold; }
-            .kpi-title { font-size: 14px; margin-bottom: 8px; }
-
-            .header-bar h2 { font-size: 22px; }
-            /* 底部导入区域样式 */
-            .import-source-container { border-top: 1px dashed #ccc; padding: 40px 0; margin-top: 40px; text-align: center; }
-            .import-source-container .upload-btn-bottom { background-color: #f8f9fa; color: #666; border: 1px solid #ddd; font-size: 16px; padding: 12px 40px; border-radius: 30px; display: inline-block; cursor: pointer; }
+            /* 数据截止日期 */
+            .data-date-banner { font-size: 12px; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+            .data-date-banner .date-value { font-size: 14px; }
+            .data-date-banner .progress-value { font-size: 14px; }
+            .data-date-banner .progress-divider { display: none; }
             
+            /* KPI卡片两列/三列排布 */
+            .kpi-container { flex-wrap: wrap; gap: 10px; padding: 10px; background-color: transparent; }
+            .kpi-box { 
+                flex: 1 1 45%; 
+                background-color: #203764; 
+                border-radius: 5px; 
+                padding: 10px; 
+                border-right: none;
+                margin-bottom: 5px;
+            }
+            .kpi-title { font-size: 12px; }
+            .kpi-value { font-size: 18px; }
+
+            /* 表格高度自适应，横向滚动 */
+            .table-container { 
+                height: auto !important; 
+                max-height: 65vh !important; /* 随内容撑开，不固定500px */
+                overflow-x: auto; 
+                -webkit-overflow-scrolling: touch; 
+            }
+            table { min-width: 800px; /* 强制表格宽度 */ }
+            th, td { font-size: 12px; padding: 6px; }
+            
+            /* 冻结三个表格的第一列 */
+            #data-table th:first-child, #data-table td:first-child,
+            #product-table th:first-child, #product-table td:first-child,
+            #sales-table th:first-child, #sales-table td:first-child {
+                position: sticky;
+                left: 0;
+                z-index: 5;
+            }
+            /* 第一列背景色，防止透明背景字体重叠 */
+            #data-table th:first-child, #product-table th:first-child, #sales-table th:first-child {
+                background-color: #203764;
+                z-index: 15; /* 表头交叉处层级更高 */
+            }
+            #data-table .prov-row td:first-child, #product-table .cat-row td:first-child, #sales-table .prov-row td:first-child { background-color: #e2efda; }
+            #data-table .office-row td:first-child, #product-table .name-row td:first-child, #sales-table .office-row td:first-child { background-color: #fce4d6; }
+            #data-table .hospital-row td:first-child, #product-table .prov-row td:first-child, #sales-table .hospital-row td:first-child { background-color: #fff; }
+            #product-table .office-row td:first-child { background-color: #ddebf7; }
+            #product-table .hospital-row td:first-child { background-color: #ffffff; }
+
+            /* 按钮和切换器 */
             .mom-toggle-container { flex-wrap: wrap; justify-content: center; }
             .sales-toggle-container { flex-wrap: wrap; justify-content: flex-start; }
             
@@ -422,10 +452,13 @@
     <div class="sticky-header">
         <div class="header-bar">
             <h2>📊 销售数据交互看板</h2>
+            <label class="upload-btn">
+                导入数据源 (CSV/Excel)
+                <input type="file" id="file-upload" accept=".csv,.xlsx,.xls">
+            </label>
         </div>
 
         <div id="message-area"></div>
-        <input type="file" id="file-upload" accept=".csv,.xlsx,.xls" style="display: none;">
 
         <!-- 移动端筛选器切换按钮 -->
         <button id="mobile-filter-toggle" class="mobile-filter-toggle" style="display: none;" onclick="toggleMobileFilters()">
@@ -669,25 +702,11 @@
         </div>
 
 
-        <div class="import-source-container">
-            <label class="upload-btn">
-                导入数据源 (CSV/Excel)
-                <input type="file" id="file-upload" accept=".csv,.xlsx,.xls">
-            </label>
-        </div>
     </div>
 
     <div id="empty-state" class="empty-state">
         👆 请点击右上角上传您的数据源 (CSV/Excel文件) 开启分析<br><br>
         <small style="color: #666;">支持的文件格式：.csv, .xlsx, .xls</small>
-    </div>
-
-    <!-- 底部导入数据源入口 -->
-    <div id="bottom-upload-container" style="text-align: center; margin-top: 30px; padding: 30px 0; border-top: 1px dashed #ccc;">
-        <label class="upload-btn-bottom" style="background-color: #f8f9fa; color: #666; border: 1px solid #ddd; font-size: 14px; padding: 10px 30px; border-radius: 20px; display: inline-block; cursor: pointer;">
-            导入数据源 (CSV/Excel)
-            <input type="file" id="file-upload-bottom" accept=".csv,.xlsx,.xls" onchange="document.getElementById('file-upload').files = this.files; document.getElementById('file-upload').dispatchEvent(new Event('change'))">
-        </label>
     </div>
 </div>
 
