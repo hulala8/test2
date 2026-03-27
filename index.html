@@ -810,26 +810,48 @@
         }
     }
 
-    // 自动加载预置加密数据 (增强型：防止手机端主线程死锁)
+    // 自动加载预置加密数据 (V2.2：增强网络容错与进度反馈)
     async function autoLoadData() {
-        showLoading('正在加载安全数据源，请稍候...');
+        console.log('Mobile Fix v2.2 Activated');
+        showLoading('正在准备获取云端加密报表...');
         
+        // 核心依赖检查
+        if (typeof CryptoJS === 'undefined' || typeof XLSX === 'undefined') {
+            resetEmptyState();
+            showMessage('核心库加载超时，请检查您的网络或刷新页面', 'error');
+            return;
+        }
+
         try {
-            console.log('开始加载默认文件:', DEFAULT_DATA_FILE);
-            
-            // 使用 Fetch 替代 XHR，支持更好的内存管理
-            const response = await fetch(DEFAULT_DATA_FILE);
-            if (!response.ok) {
-                console.warn('文件可能尚未上传:', response.status);
-                resetEmptyState();
-                return;
-            }
-            
-            const responseText = await response.text();
-            
-            // 异步分段处理避免主线程卡顿
-            await new Promise(r => setTimeout(r, 50));
-            showLoading('安全解密连接已开启...');
+            // 使用传统 XHR 以便获取进度 & 更好的旧设备兼容
+            const xhr = new XMLHttpRequest();
+            const cacheBust = '?v=' + new Date().getTime();
+            xhr.open('GET', DEFAULT_DATA_FILE + cacheBust, true);
+            xhr.responseType = 'text';
+
+            // 监听下载进度
+            xhr.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    showLoading(`正在获取安全通道数据... ${percent}%`);
+                } else {
+                    showLoading('正在持续获取安全通道数据 (5MB+)...');
+                }
+            };
+
+            const responseText = await new Promise((resolve, reject) => {
+                xhr.onload = () => {
+                    if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
+                    else reject(new Error('网络请求失败, 状态:' + xhr.status));
+                };
+                xhr.onerror = () => reject(new Error('网络连接中断, 请检查手机信号'));
+                xhr.ontimeout = () => reject(new Error('服务器响应超时, 请稍后重试'));
+                xhr.timeout = 60000; // 60s timeout
+                xhr.send();
+            });
+
+            await new Promise(r => setTimeout(r, 100));
+            showLoading('安全下载完成，正在验证证书...');
             
             let encryptedData = responseText;
             const delimiterIndex = responseText.indexOf('|');
@@ -841,68 +863,60 @@
                 }
             }
             
-            await new Promise(r => setTimeout(r, 50));
+            await new Promise(r => setTimeout(r, 100));
             showLoading('正在进行加密数据校验并深度解密...');
             
-            // 核心解密 (CryptoJS)
+            // 核心解密
             const decrypted = CryptoJS.AES.decrypt(encryptedData, ACCESS_PASSWORD);
             if (!decrypted || decrypted.sigBytes <= 0) {
-                throw new Error('解密校验失败，请检查密码或核心文件完整性');
+                throw new Error('解密校验失败，数据包完整性受损');
             }
             
-            // 清理已用内存
-            encryptedData = null;
-
-            await new Promise(r => setTimeout(r, 50));
-            showLoading('正在转换解密流（第二阶段，共三阶段）...');
+            encryptedData = ""; // 立即释放内存
             
-            // 转换为 Uint8Array
+            await new Promise(r => setTimeout(r, 50));
+            showLoading('正在转换解密流 (内存映射中)...');
+            
             const len = decrypted.sigBytes;
             const words = decrypted.words;
             const uint8Array = new Uint8Array(len);
+            
+            // 异步分块加速并防止死锁
             for (let i = 0; i < len; i++) {
                 uint8Array[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
+                if (i % 200000 === 0) await new Promise(r => setTimeout(r, 0));
             }
             
-            // 释放大型对象内存
-            decrypted.words = null;
+            decrypted.words = []; // 释放大数组
 
             await new Promise(r => setTimeout(r, 50));
-            showLoading('正在解析数据字典，请耐心等待最后几秒...');
+            showLoading('正在解析数据字典，最后阶段...');
             
-            // 使用 XLSX 读取
             const workbook = XLSX.read(uint8Array, { type: 'array' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
-                header: 1,
-                raw: false,
-                defval: ''
-            });
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, defval: '' });
 
-            if (!jsonData || jsonData.length === 0) {
-                throw new Error('未在数据包中发现有效工作表');
-            }
+            if (!jsonData || jsonData.length === 0) throw new Error('解析完成但未发现有效数据');
 
             const headers = jsonData[0].map(h => String(h).trim());
             const rows = [];
             for (let i = 1; i < jsonData.length; i++) {
                 const row = {};
-                const rowData = jsonData[i];
+                const rData = jsonData[i];
                 for (let j = 0; j < headers.length; j++) {
                     const h = headers[j];
-                    if (h) row[h] = rowData[j] !== undefined ? String(rowData[j]) : '';
+                    if (h) row[h] = rData[j] !== undefined ? String(rData[j]) : '';
                 }
                 rows.push(row);
+                if (i % 5000 === 0) await new Promise(r => setTimeout(r, 0));
             }
             
-            await new Promise(r => setTimeout(r, 50));
             validateAndProcess(rows, headers);
 
         } catch (err) {
-            console.error('手机端专属解密解析异常:', err);
+            console.error('Mobile Fix Exception:', err);
             resetEmptyState();
-            showMessage('加载异常: ' + (err.message || '未知错误'), 'error');
+            showMessage('加载中断: ' + (err.message || '未知异常'), 'error');
         }
     }
 
