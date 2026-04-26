@@ -800,12 +800,36 @@
     // 用户输入的密码（不再硬编码，由用户输入后用于解密验证）
     let userPassword = '';
 
+    // 10分钟锁定逻辑所需变量
+    const LOCKOUT_ATTEMPTS = 5;
+    const LOCKOUT_TIME_MS = 10 * 60 * 1000; // 10分钟
+
+    // 获取锁定状态
+    function getLockoutStatus() {
+        const failedCount = parseInt(localStorage.getItem('login_failed_count') || '0');
+        const lockoutUntil = parseInt(localStorage.getItem('login_lockout_until') || '0');
+        const now = Date.now();
+
+        if (lockoutUntil > now) {
+            const remainingMin = Math.ceil((lockoutUntil - now) / 1000 / 60);
+            return { locked: true, remainingMin, failedCount };
+        }
+        return { locked: false, failedCount };
+    }
+
     // 验证密码逻辑：不再比对硬编码密码，而是直接用用户输入的密码尝试解密数据
     // 如果解密成功 → 密码正确；解密失败 → 密码错误
     function verifyPassword() {
-        const input = document.getElementById('login-password').value;
+        const status = getLockoutStatus();
         const errorHint = document.getElementById('login-error');
         
+        if (status.locked) {
+            errorHint.textContent = `失败次数过多，请在 ${status.remainingMin} 分钟后再试`;
+            errorHint.style.display = 'block';
+            return;
+        }
+
+        const input = document.getElementById('login-password').value;
         if (!input) {
             errorHint.textContent = '请输入密码';
             errorHint.style.display = 'block';
@@ -821,8 +845,7 @@
         loginBtn.textContent = '正在验证密码...';
         loginBtn.disabled = true;
         
-        // 进入主看板界面并尝试用此密码解密数据
-        document.getElementById('login-overlay').style.display = 'none';
+        // 分离验证过程：先进入主看板显示加载，但不要关闭登录层，防止失败后闪烁
         document.getElementById('main-dashboard').style.display = 'block';
         autoLoadData();
     }
@@ -830,16 +853,29 @@
     // 当解密失败时，退回到登录页面
     function returnToLogin(message) {
         userPassword = '';
+        
+        // 记录失败次数
+        let failedCount = parseInt(localStorage.getItem('login_failed_count') || '0') + 1;
+        localStorage.setItem('login_failed_count', failedCount);
+        
+        let finalMessage = message || '密码错误，解密失败，请重新输入';
+        
+        if (failedCount >= LOCKOUT_ATTEMPTS) {
+            const lockoutUntil = Date.now() + LOCKOUT_TIME_MS;
+            localStorage.setItem('login_lockout_until', lockoutUntil);
+            finalMessage = `密码错误 5 次，锁定 10 分钟。请稍后再试。`;
+        }
+
         document.getElementById('login-overlay').style.display = 'flex';
         document.getElementById('main-dashboard').style.display = 'none';
         
         const errorHint = document.getElementById('login-error');
-        errorHint.textContent = message || '密码错误，解密失败，请重新输入';
+        errorHint.textContent = finalMessage;
         errorHint.style.display = 'block';
         
         const loginBtn = document.querySelector('.login-btn');
         loginBtn.textContent = '确认登录';
-        loginBtn.disabled = false;
+        loginBtn.disabled = (failedCount >= LOCKOUT_ATTEMPTS);
         
         document.getElementById('login-password').value = '';
         document.getElementById('login-password').focus();
@@ -873,11 +909,11 @@
         });
     }
 
-    function saveToCache(lastModified, filename, dataRows, headers) {
+    function saveToCache(lastModified, filename, encryptedBlob) {
         if (!dbInstance) return Promise.resolve();
         return new Promise(resolve => {
             const tx = dbInstance.transaction(STORE_NAME, 'readwrite');
-            tx.objectStore(STORE_NAME).put({ id: 'latestData', lastModified, filename, rows: dataRows, headers });
+            tx.objectStore(STORE_NAME).put({ id: 'latestData', lastModified, filename, encryptedBlob });
             tx.oncomplete = () => resolve();
             tx.onerror = () => resolve();
         });
@@ -918,69 +954,77 @@
                 console.warn('嗅探失败，可能网络离线，尝试寻找本地缓存');
             }
 
-            // 对比本地缓存
-            const cachedData = await getFromCache();
-            if (cachedData && cachedData.rows && cachedData.rows.length > 0) {
-                // 如果发现匹配的缓存，或者在离线状态下，直接使用缓存
-                if (remoteLastModified === '' || cachedData.lastModified === remoteLastModified) {
-                    console.log('IndexedDB Cache Hit! Launching app instantly.');
-                    dataCutoffDate = extractDateFromFilename(cachedData.filename);
-                    showLoading(`⚡ 命极速本地缓存 (${cachedData.rows.length.toLocaleString()} 条)，瞬间渲染中...`);
-                    await new Promise(r => setTimeout(r, 50));
-                    validateAndProcess(cachedData.rows, cachedData.headers);
-                    return; 
+            // ==== 强制重新输入密码逻辑 ====
+            // 不再直接使用缓存的“已解密数据”，而是每次都走一遍解密流程
+            // 但为了速度，我们可以缓存“加密后的原始数据包” (responseText)
+            const cachedEncrypted = await getFromCache();
+            let encryptedToProcess = null;
+            let currentFilename = '未知数据';
+
+            if (cachedEncrypted && cachedEncrypted.encryptedBlob) {
+                // 如果版本匹配，使用缓存的加密数据，省去下载时间
+                if (remoteLastModified === '' || cachedEncrypted.lastModified === remoteLastModified) {
+                    console.log('Using cached encrypted blob to save bandwidth.');
+                    encryptedToProcess = cachedEncrypted.encryptedBlob;
+                    currentFilename = cachedEncrypted.filename;
+                    dataCutoffDate = extractDateFromFilename(currentFilename);
+                    showLoading(`⚡ 命极速加密缓存，正在进行安全验证...`);
                 }
             }
 
-            // 缓存未命中或发现新版本，开始下载
-            showLoading('发现云端新版本，正在建立安全通道...');
+            if (!encryptedToProcess) {
+                // 缓存未命中或发现新版本，开始下载
+                showLoading('发现云端新版本，正在建立安全通道...');
+                
+                // 使用传统 XHR 以便获取进度 & 更好的旧设备兼容
+                const xhr = new XMLHttpRequest();
+                xhr.open('GET', DEFAULT_DATA_FILE, true);
+                xhr.responseType = 'text';
 
-            // 使用传统 XHR 以便获取进度 & 更好的旧设备兼容
-            const xhr = new XMLHttpRequest();
-            // 移除缓存破坏后缀以使用CDN节点加速
-            xhr.open('GET', DEFAULT_DATA_FILE, true);
-            xhr.responseType = 'text';
-
-            // 监听下载进度
-            xhr.onprogress = function(e) {
-                if (e.lengthComputable) {
-                    const percent = Math.round((e.loaded / e.total) * 100);
-                    showLoading(`正在获取全新数据包... ${percent}%`);
-                } else {
-                    const mb = (e.loaded / 1024 / 1024).toFixed(2);
-                    showLoading(`正在获取全新数据包: 已获取 ${mb} MB...`);
-                }
-            };
-
-            const responseText = await new Promise((resolve, reject) => {
-                xhr.onload = () => {
-                    if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
-                    else reject(new Error('网络请求失败, 状态:' + xhr.status));
+                // 监听下载进度
+                xhr.onprogress = function(e) {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        showLoading(`正在获取全新数据包... ${percent}%`);
+                    } else {
+                        const mb = (e.loaded / 1024 / 1024).toFixed(2);
+                        showLoading(`正在获取全新数据包: 已获取 ${mb} MB...`);
+                    }
                 };
-                xhr.onerror = () => reject(new Error('网络连接异常中断，请检查手机信号或切换 WiFi 再试'));
-                // 彻底取消系统级超时限制，完全交给浏览器底层控制，适应慢网速
-                xhr.send();
-            });
 
-            // 如果使用 fetch 没能成功拿到 Last-Modified，这里拿 XHR 头补上，确保下次能对比
-            if (!remoteLastModified) {
-                remoteLastModified = xhr.getResponseHeader('Last-Modified') || xhr.getResponseHeader('ETag') || new Date().toISOString();
+                const responseText = await new Promise((resolve, reject) => {
+                    xhr.onload = () => {
+                        if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
+                        else reject(new Error('网络请求失败, 状态:' + xhr.status));
+                    };
+                    xhr.onerror = () => reject(new Error('网络连接异常中断，请检查手机信号或切换 WiFi 再试'));
+                    xhr.send();
+                });
+
+                if (!remoteLastModified) {
+                    remoteLastModified = xhr.getResponseHeader('Last-Modified') || xhr.getResponseHeader('ETag') || new Date().toISOString();
+                }
+                
+                encryptedToProcess = responseText;
             }
 
             await new Promise(r => setTimeout(r, 100));
-            showLoading('安全下载完成，正在验证证书...');
+            showLoading('通道就绪，正在解析文件头...');
             
-            let encryptedData = responseText;
-            let originalFilename = '未知数据';
-            const delimiterIndex = responseText.indexOf('|');
+            let encryptedData = encryptedToProcess;
+            let originalFilename = currentFilename || '未知数据';
+            const delimiterIndex = encryptedToProcess.indexOf('|');
             if (delimiterIndex > -1 && delimiterIndex < 500) {
-                originalFilename = responseText.substring(0, delimiterIndex);
+                originalFilename = encryptedToProcess.substring(0, delimiterIndex);
                 if (originalFilename.endsWith('.xlsx') || originalFilename.endsWith('.xls') || originalFilename.endsWith('.bin')) {
                     dataCutoffDate = extractDateFromFilename(originalFilename);
-                    encryptedData = responseText.substring(delimiterIndex + 1);
+                    encryptedData = encryptedToProcess.substring(delimiterIndex + 1);
                 }
             }
             
+            // 将加密数据存入缓存以便下次使用（不再存储解密后的 rows）
+            saveToCache(remoteLastModified, originalFilename, encryptedToProcess).catch(e=>console.warn('加密缓存写入失败', e));
+
             await new Promise(r => setTimeout(r, 50));
             showLoading('正在进行加密数据校验并深度解密...');
             
@@ -1059,9 +1103,12 @@
                 }
             }
             
-            // 注入离线数据库用于下次秒开！
-            saveToCache(remoteLastModified, originalFilename, rows, headers).catch(e=>console.warn('缓存写入失败', e));
+            // 登录成功，重置失败计数
+            localStorage.removeItem('login_failed_count');
+            localStorage.removeItem('login_lockout_until');
             
+            // 真正隐藏登录层
+            document.getElementById('login-overlay').style.display = 'none';
             validateAndProcess(rows, headers);
 
         } catch (err) {
@@ -1083,9 +1130,15 @@
     }
 
     // 页面加载后的操作
-    // 不再自动跳过登录，因为每次都需要用户输入密码来解密数据
     window.onload = function() {
-        // 页面刷新后必须重新输入密码
+        const status = getLockoutStatus();
+        if (status.locked) {
+            const errorHint = document.getElementById('login-error');
+            errorHint.textContent = `失败次数过多，请在 ${status.remainingMin} 分钟后再试`;
+            errorHint.style.display = 'block';
+            document.querySelector('.login-btn').disabled = true;
+        }
+        document.getElementById('login-password').focus();
     };
 
     // 环比计算模式 'monthly': 月度环比增长, 'rolling': 近三月环比增长
