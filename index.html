@@ -941,9 +941,8 @@
 
     // 自动加载预置加密数据 (V3.0: 极限压缩 + 离线缓存双引擎加速)
     async function autoLoadData() {
-        console.log('Mobile Fix v3.0 (Minify+Cache) Activated');
-        showLoading('正在嗅探云端数据版本...');
-        
+        showLoading('正在获取最新数据...');
+
         if (typeof CryptoJS === 'undefined' || typeof XLSX === 'undefined' || typeof pako === 'undefined') {
             resetEmptyState();
             showMessage('核心库加载超时，请检查您的网络或刷新页面', 'error');
@@ -952,82 +951,49 @@
 
         try {
             await initDB();
-            let remoteLastModified = '';
-            
-            // 嗅探云端最新版本号
-            try {
-                const headResponse = await fetch(DEFAULT_DATA_FILE, { method: 'HEAD' });
-                if (headResponse.ok) {
-                    remoteLastModified = headResponse.headers.get('Last-Modified') || headResponse.headers.get('ETag') || '';
-                }
-            } catch (e) {
-                console.warn('嗅探失败，可能网络离线，尝试寻找本地缓存');
-            }
-
-            // ==== 强制重新输入密码逻辑 ====
-            // 不再直接使用缓存的“已解密数据”，而是每次都走一遍解密流程
-            // 但为了速度，我们可以缓存“加密后的原始数据包” (responseText)
             const cachedEncrypted = await getFromCache();
             let encryptedToProcess = null;
             let currentFilename = '未知数据';
+            let remoteLastModified = '';
 
-            // 只有在 HEAD 嗅探成功且版本号匹配时才使用缓存；
-            // HEAD 失败（remoteLastModified 为空）时强制重新下载，避免手机网络抖动导致永远读旧缓存
-            if (cachedEncrypted && cachedEncrypted.encryptedBlob &&
-                remoteLastModified !== '' && cachedEncrypted.lastModified === remoteLastModified) {
-                console.log('Using cached encrypted blob to save bandwidth.');
-                encryptedToProcess = cachedEncrypted.encryptedBlob;
-                currentFilename = cachedEncrypted.filename;
-                dataCutoffDate = extractDateFromFilename(currentFilename);
-                showLoading(`⚡ 命极速加密缓存，正在进行安全验证...`);
-            }
+            // 每次都直接下载最新文件，不依赖 HEAD 预检
+            // IndexedDB 缓存仅作断网兜底，避免旧缓存导致跨浏览器数据错乱
+            const xhr = new XMLHttpRequest();
+            // 加 ?_=timestamp 防止浏览器/CDN 返回 304 旧内容
+            xhr.open('GET', DEFAULT_DATA_FILE + '?_=' + Date.now(), true);
+            xhr.responseType = 'text';
 
-            if (!encryptedToProcess) {
-                // 缓存未命中、版本更新或 HEAD 嗅探失败，重新下载
-                showLoading('正在建立安全通道，获取最新数据...');
-
-                const xhr = new XMLHttpRequest();
-                xhr.open('GET', DEFAULT_DATA_FILE, true);
-                xhr.responseType = 'text';
-
-                xhr.onprogress = function(e) {
-                    if (e.lengthComputable) {
-                        const percent = Math.round((e.loaded / e.total) * 100);
-                        showLoading(`正在获取全新数据包... ${percent}%`);
-                    } else {
-                        const mb = (e.loaded / 1024 / 1024).toFixed(2);
-                        showLoading(`正在获取全新数据包: 已获取 ${mb} MB...`);
-                    }
-                };
-
-                let responseText;
-                try {
-                    responseText = await new Promise((resolve, reject) => {
-                        xhr.onload = () => {
-                            if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
-                            else reject(new Error('网络请求失败, 状态:' + xhr.status));
-                        };
-                        xhr.onerror = () => reject(new Error('网络连接异常中断，请检查手机信号或切换 WiFi 再试'));
-                        xhr.send();
-                    });
-                } catch (downloadErr) {
-                    // 下载失败时（真正离线），尝试回退到本地缓存
-                    if (cachedEncrypted && cachedEncrypted.encryptedBlob) {
-                        console.warn('下载失败，回退到本地缓存（离线模式）', downloadErr);
-                        encryptedToProcess = cachedEncrypted.encryptedBlob;
-                        currentFilename = cachedEncrypted.filename;
-                        dataCutoffDate = extractDateFromFilename(currentFilename);
-                        showLoading('⚠️ 网络不可用，使用本地缓存数据...');
-                    } else {
-                        throw downloadErr;
-                    }
+            xhr.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    showLoading(`正在获取数据包... ${percent}%`);
+                } else {
+                    const mb = (e.loaded / 1024 / 1024).toFixed(2);
+                    showLoading(`正在获取数据包: 已获取 ${mb} MB...`);
                 }
+            };
 
-                if (responseText !== undefined) {
-                    if (!remoteLastModified) {
-                        remoteLastModified = xhr.getResponseHeader('Last-Modified') || xhr.getResponseHeader('ETag') || new Date().toISOString();
-                    }
-                    encryptedToProcess = responseText;
+            try {
+                const responseText = await new Promise((resolve, reject) => {
+                    xhr.onload = () => {
+                        if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
+                        else reject(new Error('网络请求失败, 状态:' + xhr.status));
+                    };
+                    xhr.onerror = () => reject(new Error('网络连接异常中断，请检查手机信号或切换 WiFi 再试'));
+                    xhr.send();
+                });
+                remoteLastModified = xhr.getResponseHeader('Last-Modified') || xhr.getResponseHeader('ETag') || new Date().toISOString();
+                encryptedToProcess = responseText;
+            } catch (downloadErr) {
+                // 下载失败（真正断网），回退到 IndexedDB 离线缓存
+                if (cachedEncrypted && cachedEncrypted.encryptedBlob) {
+                    console.warn('下载失败，回退到本地缓存（离线模式）', downloadErr);
+                    encryptedToProcess = cachedEncrypted.encryptedBlob;
+                    currentFilename = cachedEncrypted.filename;
+                    dataCutoffDate = extractDateFromFilename(currentFilename);
+                    showLoading('⚠️ 网络不可用，使用本地缓存数据...');
+                } else {
+                    throw downloadErr;
                 }
             }
 
