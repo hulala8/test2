@@ -951,7 +951,6 @@
 
         try {
             await initDB();
-            const cachedEncrypted = await getFromCache();
             let encryptedToProcess = null;
             let currentFilename = '未知数据';
             let remoteLastModified = '';
@@ -973,29 +972,18 @@
                 }
             };
 
-            try {
-                const responseText = await new Promise((resolve, reject) => {
-                    xhr.onload = () => {
-                        if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
-                        else reject(new Error('网络请求失败, 状态:' + xhr.status));
-                    };
-                    xhr.onerror = () => reject(new Error('网络连接异常中断，请检查手机信号或切换 WiFi 再试'));
-                    xhr.send();
-                });
-                remoteLastModified = xhr.getResponseHeader('Last-Modified') || xhr.getResponseHeader('ETag') || new Date().toISOString();
-                encryptedToProcess = responseText;
-            } catch (downloadErr) {
-                // 下载失败（真正断网），回退到 IndexedDB 离线缓存
-                if (cachedEncrypted && cachedEncrypted.encryptedBlob) {
-                    console.warn('下载失败，回退到本地缓存（离线模式）', downloadErr);
-                    encryptedToProcess = cachedEncrypted.encryptedBlob;
-                    currentFilename = cachedEncrypted.filename;
-                    dataCutoffDate = extractDateFromFilename(currentFilename);
-                    showLoading('⚠️ 网络不可用，使用本地缓存数据...');
-                } else {
-                    throw downloadErr;
-                }
-            }
+            const responseText = await new Promise((resolve, reject) => {
+                xhr.timeout = 30000; // 30 秒超时，防止 Safari 请求卡死
+                xhr.onload = () => {
+                    if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
+                    else reject(new Error('网络请求失败，状态:' + xhr.status));
+                };
+                xhr.onerror = () => reject(new Error('网络连接异常，请检查手机信号或切换 WiFi 后刷新重试'));
+                xhr.ontimeout = () => reject(new Error('网络超时，请检查手机信号或切换 WiFi 后刷新重试'));
+                xhr.send();
+            });
+            remoteLastModified = xhr.getResponseHeader('Last-Modified') || xhr.getResponseHeader('ETag') || new Date().toISOString();
+            encryptedToProcess = responseText;
 
             await new Promise(r => setTimeout(r, 100));
             showLoading('通道就绪，正在解析文件头...');
@@ -1011,9 +999,6 @@
                 }
             }
             
-            // 将加密数据存入缓存以便下次使用（不再存储解密后的 rows）
-            saveToCache(remoteLastModified, originalFilename, encryptedToProcess).catch(e=>console.warn('加密缓存写入失败', e));
-
             await new Promise(r => setTimeout(r, 50));
             showLoading('正在进行加密数据校验并深度解密...');
             
@@ -1095,7 +1080,10 @@
             // 登录成功，重置失败计数
             localStorage.removeItem('login_failed_count');
             localStorage.removeItem('login_lockout_until');
-            
+
+            // 解密成功后才写缓存，确保缓存里存的永远是有效数据
+            saveToCache(remoteLastModified, originalFilename, encryptedToProcess).catch(e => console.warn('缓存写入失败', e));
+
             // 真正隐藏登录层
             document.getElementById('login-overlay').style.display = 'none';
             validateAndProcess(rows, headers);
