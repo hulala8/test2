@@ -971,27 +971,25 @@
             let encryptedToProcess = null;
             let currentFilename = '未知数据';
 
-            if (cachedEncrypted && cachedEncrypted.encryptedBlob) {
-                // 如果版本匹配，使用缓存的加密数据，省去下载时间
-                if (remoteLastModified === '' || cachedEncrypted.lastModified === remoteLastModified) {
-                    console.log('Using cached encrypted blob to save bandwidth.');
-                    encryptedToProcess = cachedEncrypted.encryptedBlob;
-                    currentFilename = cachedEncrypted.filename;
-                    dataCutoffDate = extractDateFromFilename(currentFilename);
-                    showLoading(`⚡ 命极速加密缓存，正在进行安全验证...`);
-                }
+            // 只有在 HEAD 嗅探成功且版本号匹配时才使用缓存；
+            // HEAD 失败（remoteLastModified 为空）时强制重新下载，避免手机网络抖动导致永远读旧缓存
+            if (cachedEncrypted && cachedEncrypted.encryptedBlob &&
+                remoteLastModified !== '' && cachedEncrypted.lastModified === remoteLastModified) {
+                console.log('Using cached encrypted blob to save bandwidth.');
+                encryptedToProcess = cachedEncrypted.encryptedBlob;
+                currentFilename = cachedEncrypted.filename;
+                dataCutoffDate = extractDateFromFilename(currentFilename);
+                showLoading(`⚡ 命极速加密缓存，正在进行安全验证...`);
             }
 
             if (!encryptedToProcess) {
-                // 缓存未命中或发现新版本，开始下载
-                showLoading('发现云端新版本，正在建立安全通道...');
-                
-                // 使用传统 XHR 以便获取进度 & 更好的旧设备兼容
+                // 缓存未命中、版本更新或 HEAD 嗅探失败，重新下载
+                showLoading('正在建立安全通道，获取最新数据...');
+
                 const xhr = new XMLHttpRequest();
                 xhr.open('GET', DEFAULT_DATA_FILE, true);
                 xhr.responseType = 'text';
 
-                // 监听下载进度
                 xhr.onprogress = function(e) {
                     if (e.lengthComputable) {
                         const percent = Math.round((e.loaded / e.total) * 100);
@@ -1002,20 +1000,35 @@
                     }
                 };
 
-                const responseText = await new Promise((resolve, reject) => {
-                    xhr.onload = () => {
-                        if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
-                        else reject(new Error('网络请求失败, 状态:' + xhr.status));
-                    };
-                    xhr.onerror = () => reject(new Error('网络连接异常中断，请检查手机信号或切换 WiFi 再试'));
-                    xhr.send();
-                });
-
-                if (!remoteLastModified) {
-                    remoteLastModified = xhr.getResponseHeader('Last-Modified') || xhr.getResponseHeader('ETag') || new Date().toISOString();
+                let responseText;
+                try {
+                    responseText = await new Promise((resolve, reject) => {
+                        xhr.onload = () => {
+                            if (xhr.status === 200 || xhr.status === 304) resolve(xhr.responseText);
+                            else reject(new Error('网络请求失败, 状态:' + xhr.status));
+                        };
+                        xhr.onerror = () => reject(new Error('网络连接异常中断，请检查手机信号或切换 WiFi 再试'));
+                        xhr.send();
+                    });
+                } catch (downloadErr) {
+                    // 下载失败时（真正离线），尝试回退到本地缓存
+                    if (cachedEncrypted && cachedEncrypted.encryptedBlob) {
+                        console.warn('下载失败，回退到本地缓存（离线模式）', downloadErr);
+                        encryptedToProcess = cachedEncrypted.encryptedBlob;
+                        currentFilename = cachedEncrypted.filename;
+                        dataCutoffDate = extractDateFromFilename(currentFilename);
+                        showLoading('⚠️ 网络不可用，使用本地缓存数据...');
+                    } else {
+                        throw downloadErr;
+                    }
                 }
-                
-                encryptedToProcess = responseText;
+
+                if (responseText !== undefined) {
+                    if (!remoteLastModified) {
+                        remoteLastModified = xhr.getResponseHeader('Last-Modified') || xhr.getResponseHeader('ETag') || new Date().toISOString();
+                    }
+                    encryptedToProcess = responseText;
+                }
             }
 
             await new Promise(r => setTimeout(r, 100));
